@@ -25,7 +25,9 @@ public:
           m_socket(m_ioService, udp::endpoint(udp::v4(), port)),
           m_senderEndpoint(udp::v4(),port),
           m_destinationEndpoint(udp::v4(),port),
-          m_backgroundThread()
+          m_backgroundThread(),
+          m_errorStatus(false),
+          m_open(false)
     {
         m_ioService.post(boost::bind(&AsyncUDP::read,this));
         boost::thread t(boost::bind(&boost::asio::io_service::run, &m_ioService));
@@ -36,8 +38,8 @@ public:
         m_socket.async_send_to(
             boost::asio::buffer(buf, len), m_destinationEndpoint,
             boost::bind(&AsyncUDP::handleSend, this,
-            boost::asio::placeholders::error,
-            boost::asio::placeholders::bytes_transferred));
+                        boost::asio::placeholders::error,
+                        boost::asio::placeholders::bytes_transferred));
     }
 
     void write(const std::string & str) {
@@ -46,13 +48,32 @@ public:
         write(buf,len);
     }
 
+    void doClose() {
+        boost::system::error_code ec;
+        m_socket.cancel(ec);
+        if (ec) setErrorStatus(true);
+        m_socket.close(ec);
+        if (ec) setErrorStatus(true);
+    }
+
     void close() {
+        if (!get_open()) return;
+        m_open = false;
+        m_backgroundThread.join();
+        if (m_errorStatus) {
+            throw(boost::system::system_error(boost::system::error_code(),"Error while closing the device"));
+        }
+    }
+
+    void setErrorStatus(bool e) {
+        boost::mutex::scoped_lock(m_errorMutex);
+        m_errorStatus = e;
     }
 
 private:
 
     void handleReceive(const boost::system::error_code& error,
-                             size_t bytes_recvd)
+                       size_t bytes_recvd)
     {
         if (!error && bytes_recvd > 0)
         {
@@ -65,7 +86,7 @@ private:
     }
 
     void handleSend(const boost::system::error_code& error,
-                        size_t bytes_sent)
+                    size_t bytes_sent)
     {
         //std::cout << "handle send" << std::endl;
         read();
@@ -75,8 +96,12 @@ private:
         m_socket.async_receive_from(
             boost::asio::buffer(m_readBuffer, m_maxLength), m_senderEndpoint,
             boost::bind(&AsyncUDP::handleReceive, this,
-            boost::asio::placeholders::error,
-            boost::asio::placeholders::bytes_transferred));
+                        boost::asio::placeholders::error,
+                        boost::asio::placeholders::bytes_transferred));
+    }
+
+    bool get_open() {
+        return m_open;
     }
 
     boost::asio::io_service m_ioService;
@@ -88,6 +113,9 @@ private:
     char m_readBuffer[m_maxLength];
     boost::mutex m_readMutex;
     boost::mutex m_writeMutex;
+    bool m_errorStatus;
+    boost::mutex m_errorMutex;
+    bool m_open;
 };
 
 int main(int argc, char* argv[])

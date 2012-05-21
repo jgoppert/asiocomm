@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 
-project(asio)
+project(asiocomm)
 
 find_package(Boost 1.42 REQUIRED COMPONENTS thread system)
 
